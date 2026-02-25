@@ -2727,6 +2727,40 @@ bool FramebufferManagerCommon::NotifyBlockTransferBefore(u32 dstBasePtr, int dst
 			WARN_LOG_N_TIMES(blockformat, 5, Log::G3D, "Mismatched buffer formats in block transfer: %s->%s (%dx%d)",
 				GeBufferFormatToString(srcRect.vfb->Format(srcRect.channel)), GeBufferFormatToString(dstRect.vfb->Format(dstRect.channel)),
 				width, height);
+
+			VirtualFramebuffer *src = srcRect.vfb, *dst = dstRect.vfb;
+			float scaleFactorX = 1.0f;
+			Draw2DPipeline *pipeline = GetReinterpretPipeline(src->fb_format, dst->fb_format, &scaleFactorX);
+
+			if (pipeline) {
+				const char *pass_name = reinterpretStrings[(int)src->fb_format][(int)dst->fb_format];
+
+				int srcWidth = width * src->renderScaleFactor;
+				int srcHeight = height * src->renderScaleFactor;
+				int dstWidth = width * dst->renderScaleFactor;
+				int dstHeight = height * dst->renderScaleFactor;
+
+				int srcX1 = srcX * src->renderScaleFactor;
+				int srcY1 = srcY * src->renderScaleFactor;
+				int srcX2 = srcX1 + srcWidth;
+				int srcY2 = srcY1 + srcHeight;
+
+				int dstX1 = dstX * dst->renderScaleFactor;
+				int dstY1 = dstY * dst->renderScaleFactor;
+				int dstX2 = dstX1 + dstWidth;
+				int dstY2 = dstY1 + dstHeight;
+
+				srcX1 /= scaleFactorX;
+				srcX2 /= scaleFactorX;
+
+				gpuStats.numReinterpretCopies++;
+				FlushBeforeCopy();
+				BlitUsingRaster(src->fbo, srcX1, srcY1, srcX2, srcY2,
+					dst->fbo, dstX1, dstY1, dstX2, dstY2, false, dst->renderScaleFactor, pipeline, pass_name);
+				RebindFramebuffer("RebindFramebuffer - Inter-buffer block transfer with mismatched formats");
+				SetColorUpdated(dst, skipDrawReason);
+				return true;
+			}
 		}
 
 		// TODO
@@ -3600,7 +3634,7 @@ int FramebufferManagerCommon::GetFramebufferLayers() const {
 
 VirtualFramebuffer *FramebufferManagerCommon::ResolveFramebufferColorToFormat(VirtualFramebuffer *src, GEBufferFormat newFormat) {
 	// Look for an identical framebuffer with the new format
-	_dbg_assert_(src->fb_format != newFormat);
+	//_dbg_assert_(src->fb_format != newFormat);
 
 	VirtualFramebuffer *vfb = nullptr;
 	for (auto dest : vfbs_) {
